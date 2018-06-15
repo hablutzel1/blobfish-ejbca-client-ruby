@@ -6,19 +6,18 @@ module Blobfish
 
     # See too 'D:\d\ejbca\tests\ejbca_ws_client\src\p12onejbcaside' for a Java alternative for this client.
     class Client
-
+      # TODO evaluate to receive it as an optional parameter in 'initialize' (defaulting to an empty string).
       USERNAME_PREFIX = 'llama_'
       STATUS_NEW = 10
       TOKEN_TYPE_P12 = 'P12'
 
-      def initialize(wsdl_url, ws_client_certificate, ws_client_key, ws_client_key_password, ca_name, cert_profile, ee_profile)
+      def initialize(wsdl_url, ws_additional_trusted_anchors, ws_client_certificate, ws_client_key, ws_client_key_password, ca_name, cert_profile, ee_profile)
         @client = Savon.client(
             :wsdl => wsdl_url,
             :ssl_cert_file => ws_client_certificate,
             :ssl_cert_key_file => ws_client_key,
             :ssl_cert_key_password => ws_client_key_password,
-        # Only for development.
-        # :ssl_ca_cert_file => "C:/Users/hablu/Desktop/managementca.cer",
+            :ssl_ca_cert_file => ws_additional_trusted_anchors,
         # log: true,
         # log_level: :debug,
         )

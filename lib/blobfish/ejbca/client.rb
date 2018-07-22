@@ -11,6 +11,7 @@ module Blobfish
       STATUS_NEW = 10
       TOKEN_TYPE_P12 = 'P12'
 
+      # @param [String] ws_additional_trusted_anchors e.g. +ca-certificates.crt+. Required only if +wsdl_url+ uses a non-commercial SSL certificate, otherwise it should be +nil+.
       def initialize(wsdl_url, ws_additional_trusted_anchors, ws_client_certificate, ws_client_key, ws_client_key_password, ca_name, cert_profile, ee_profile)
         @client = Savon.client(
             :wsdl => wsdl_url,

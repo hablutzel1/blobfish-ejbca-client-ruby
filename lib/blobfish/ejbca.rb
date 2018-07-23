@@ -1,5 +1,6 @@
-require "blobfish/ejbca/version"
-require "blobfish/ejbca/client"
+
+require 'blobfish/ejbca/version'
+require 'blobfish/ejbca/client'
 
 module Blobfish
   module Ejbca

@@ -30,7 +30,8 @@ module Blobfish
       end
 
       # Note that it requires 'Allow validity override' set in the EJBCA certificate profile for +validity_days+ to be effective.
-      def request_pfx(ejbca_username, email_address, subject_dn, subject_alt_name, validity_days, pfx_password)
+      # 'custom_friendly_name' is optional. It can be set to 'nil' to maintain the one set by EJBCA.
+      def request_pfx(ejbca_username, email_address, subject_dn, subject_alt_name, validity_days, pfx_password, custom_friendly_name)
         # TODO allow to request a certificate with an explicit end date to allow for reissue capability from the RA.
         ws_call(:edit_user,
                 arg0: {
@@ -56,6 +57,11 @@ module Blobfish
         )
         pfx_bytes = Client.double_decode64(ws_resp[:keystore_data])
         pkcs12 = OpenSSL::PKCS12.new(pfx_bytes, pfx_password)
+        unless custom_friendly_name.nil?
+          # NOTE that this is currently removing the friendlyName for all bundled CA certs, but this is not expected to produce problems.
+          updated_pkcs12 = OpenSSL::PKCS12.create(pfx_password, custom_friendly_name, pkcs12.key, pkcs12.certificate, pkcs12.ca_certs)
+          pfx_bytes = updated_pkcs12.to_der
+        end
         {pfx: pfx_bytes, cert: Certificate.new(pkcs12.certificate)}
       end
 

@@ -29,7 +29,13 @@ module Blobfish
         @ee_profile = ee_profile
       end
 
+      def self.escape_dn_attr_value(val)
+        # TODO study escaping rules in detail. Take a look at relevant standards and the EJBCA implementation.
+        val.gsub(",", "\\,")
+      end
+
       # Note that it requires 'Allow validity override' set in the EJBCA certificate profile for +validity_days+ to be effective.
+      # 'subject_dn' should have its attributes values escaped using 'escape_dn_attr_value'.
       # 'custom_friendly_name' is optional. It can be set to 'nil' to maintain the one set by EJBCA.
       def request_pfx(ejbca_username, email_address, subject_dn, subject_alt_name, validity_days, pfx_password, custom_friendly_name)
         # TODO allow to request a certificate with an explicit end date to allow for reissue capability from the RA.

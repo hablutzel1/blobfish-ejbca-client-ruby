@@ -10,6 +10,8 @@ module Blobfish
     class Client
       STATUS_NEW = 10
       TOKEN_TYPE_P12 = 'P12'
+      TOKEN_TYPE_USERGENERATED = 'USERGENERATED'
+      RESPONSETYPE_CERTIFICATE = 'CERTIFICATE'
       REVOCATION_REASON_UNSPECIFIED = 0
 
       # @param [String] ws_additional_trusted_anchors e.g. +ca-certificates.crt+. Required only if +wsdl_url+ uses a non-commercial SSL certificate, otherwise it should be +nil+.
@@ -41,36 +43,12 @@ module Blobfish
       # 'subject_dn' should have its attributes values escaped using 'escape_dn_attr_value'.
       # 'custom_friendly_name' is optional. It can be set to 'nil' to maintain the one set by EJBCA.
       def request_pfx(ejbca_username, email_address, subject_dn, subject_alt_name, validity_type, validity_value, pfx_password, custom_friendly_name)
-        if validity_type == :days_from_now
-          now_with_offset_applied = Time.now.utc + @cert_validity_offset
-          not_after = now_with_offset_applied + (validity_value * 24 * 60 * 60)
-        elsif validity_type == :fixed_not_after
-          unless validity_value.is_a? Time
-            raise ArgumentError
-          end
-          not_after = validity_value.utc
-        else
-          raise NotImplementedError
-        end
+        end_user = create_end_user(ejbca_username, pfx_password, TOKEN_TYPE_P12, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
         ws_call(:edit_user,
-                arg0: {
-                    username: ejbca_username,
-                    password: pfx_password,
-                    status: STATUS_NEW,
-                    token_type: TOKEN_TYPE_P12,
-                    email: email_address,
-                    subjectDN: subject_dn,
-                    subject_alt_name: subject_alt_name,
-                    ca_name: @ca_name,
-                    certificate_profile_name: @cert_profile,
-                    end_entity_profile_name: @ee_profile,
-                    extended_information: [{ name: 'customdata_ENDTIME', value: not_after.strftime('%Y-%m-%d %H:%M')}]
-                }
-        )
+                arg0: end_user)
         ws_resp = ws_call(:pkcs12_req,
                           arg0: ejbca_username,
                           arg1: pfx_password,
-                          arg2: nil,
                           arg3: '2048',
                           arg4: 'RSA'
         )
@@ -82,6 +60,18 @@ module Blobfish
           pfx_bytes = updated_pkcs12.to_der
         end
         {pfx: pfx_bytes, cert: Certificate.new(pkcs12.certificate)}
+
+      end
+
+      def request_from_csr(pem_csr, ejbca_username, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
+        end_user = create_end_user(ejbca_username, nil, TOKEN_TYPE_USERGENERATED, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
+        ws_resp = ws_call(:certificate_request,
+                          arg0: end_user,
+                          arg1: pem_csr,
+                          arg2: 0,
+                          arg4: RESPONSETYPE_CERTIFICATE)
+        cert_as_der = Client.double_decode64(ws_resp[:data])
+        Certificate.new(cert_as_der)
       end
 
       def revoke_cert(serial_number)
@@ -116,6 +106,34 @@ module Blobfish
       end
 
       private
+
+      def create_end_user(ejbca_username, password, token_type, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
+        if validity_type == :days_from_now
+          now_with_offset_applied = Time.now.utc + @cert_validity_offset
+          not_after = now_with_offset_applied + (validity_value * 24 * 60 * 60)
+        elsif validity_type == :fixed_not_after
+          unless validity_value.is_a? Time
+            raise ArgumentError
+          end
+          not_after = validity_value.utc
+        else
+          raise NotImplementedError
+        end
+        end_user = {}
+        end_user[:username] = ejbca_username
+        # When password is nil, the element is excluded from the hash, otherwise it would produce <password xsi:nil="true"/> which is interpreted as "" in the EJBCA side. See https://github.com/savonrb/gyoku/#user-content-hash-values.
+        end_user[:password] = password unless password == nil
+        end_user[:status] = STATUS_NEW
+        end_user[:token_type] = token_type
+        end_user[:email] = email_address
+        end_user[:subjectDN] = subject_dn
+        end_user[:subject_alt_name] = subject_alt_name
+        end_user[:ca_name] = @ca_name
+        end_user[:certificate_profile_name] = @cert_profile
+        end_user[:end_entity_profile_name] = @ee_profile
+        end_user[:extended_information] = [{name: 'customdata_ENDTIME', value: not_after.strftime('%Y-%m-%d %H:%M')}]
+        end_user
+      end
 
       def self.double_decode64(b64)
         b64 = Base64.decode64(b64)

@@ -15,9 +15,8 @@ module Blobfish
       REVOCATION_REASON_UNSPECIFIED = 0
 
       # @param [String] ws_additional_trusted_anchors e.g. +ca-certificates.crt+. Required only if +wsdl_url+ uses a non-commercial SSL certificate, otherwise it should be +nil+.
-      # @param [Integer] cert_validity_offset the certificate validity offset that EJBCA will apply to the current certificate profile. It is set by default to -600 seconds. See 'certificate.validityoffset' in EJBCA's 'cesecore.properties'.
-      def initialize(wsdl_url, ws_additional_trusted_anchors, ws_client_certificate, ws_client_key, ws_client_key_password, ca_name, cert_profile, ee_profile, cert_validity_offset = -600)
-        @client = Savon.client(
+      def initialize(wsdl_url, ws_additional_trusted_anchors, ws_client_certificate, ws_client_key, ws_client_key_password, ca_name, cert_profile, ee_profile)
+        @savon_client = Savon.client(
             wsdl: wsdl_url,
             ssl_cert_file: ws_client_certificate,
             ssl_cert_key_file: ws_client_key,
@@ -30,8 +29,6 @@ module Blobfish
         @ca_dn = query_ca_dn(ca_name)
         @cert_profile = cert_profile
         @ee_profile = ee_profile
-        # TODO try to get the certificate profile validity offset or the DEFAULT_VALIDITY_OFFSET (if the former isn't set) through the EJBCA WS API to free the gem client of the burden to provide it.
-        @cert_validity_offset = cert_validity_offset
       end
 
       def self.escape_dn_attr_value(val)
@@ -39,9 +36,9 @@ module Blobfish
         val.gsub(",", "\\,")
       end
 
-      # Note that it requires 'Allow validity override' set in the EJBCA certificate profile for +validity_days+ to be effective.
+      # Note that it requires 'Allow validity override' set in the EJBCA certificate profile for the pair +validity_type,validity_value+ to be effective.
       # 'subject_dn' should have its attributes values escaped using 'escape_dn_attr_value'.
-      # 'custom_friendly_name' is optional. It can be set to 'nil' to maintain the one set by EJBCA.
+      # 'custom_friendly_name' is optional. It can be set to 'nil' to maintain the one set by EJBCA (TODO confirm if EJBCA actually sets a friendly name).
       def request_pfx(ejbca_username, email_address, subject_dn, subject_alt_name, validity_type, validity_value, pfx_password, custom_friendly_name)
         end_user = create_end_user(ejbca_username, pfx_password, TOKEN_TYPE_P12, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
         ws_call(:edit_user,
@@ -108,17 +105,6 @@ module Blobfish
       private
 
       def create_end_user(ejbca_username, password, token_type, email_address, subject_dn, subject_alt_name, validity_type, validity_value)
-        if validity_type == :days_from_now
-          now_with_offset_applied = Time.now.utc + @cert_validity_offset
-          not_after = now_with_offset_applied + (validity_value * 24 * 60 * 60)
-        elsif validity_type == :fixed_not_after
-          unless validity_value.is_a? Time
-            raise ArgumentError
-          end
-          not_after = validity_value.utc
-        else
-          raise NotImplementedError
-        end
         end_user = {}
         end_user[:username] = ejbca_username
         # When password is nil, the element is excluded from the hash, otherwise it would produce <password xsi:nil="true"/> which is interpreted as "" in the EJBCA side. See https://github.com/savonrb/gyoku/#user-content-hash-values.
@@ -131,7 +117,18 @@ module Blobfish
         end_user[:ca_name] = @ca_name
         end_user[:certificate_profile_name] = @cert_profile
         end_user[:end_entity_profile_name] = @ee_profile
-        end_user[:extended_information] = [{name: 'customdata_ENDTIME', value: not_after.strftime('%Y-%m-%d %H:%M')}]
+        if validity_type == :days_from_now
+          custom_endtime = "#{validity_value}:0:0"
+        elsif validity_type == :fixed_not_after
+          unless validity_value.is_a? Time
+            raise ArgumentError
+          end
+          not_after = validity_value.utc
+          custom_endtime = not_after.strftime('%Y-%m-%d %H:%M')
+        else
+          raise NotImplementedError
+        end
+        end_user[:extended_information] = [{name: 'customdata_ENDTIME', value: custom_endtime}]
         end_user
       end
 
@@ -142,13 +139,14 @@ module Blobfish
 
       def query_ca_dn(ca_name)
         ca_chain = ws_call(:get_last_ca_chain, arg0: ca_name)
-        ca_cert = Client.double_decode64(ca_chain[0][:certificate_data])
+        ca_cert = ca_chain.kind_of?(Array) ? ca_chain[0] : ca_chain
+        ca_cert = Client.double_decode64(ca_cert[:certificate_data])
         ca_cert = OpenSSL::X509::Certificate.new(ca_cert)
         ca_cert.subject.to_s(OpenSSL::X509::Name::RFC2253)
       end
 
       def ws_call(operation_name, message)
-        response = @client.call(operation_name, soap_action: false, message: message)
+        response = @savon_client.call(operation_name, soap_action: false, message: message)
         response.to_hash["#{operation_name}_response".to_sym][:return]
       end
 

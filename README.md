@@ -22,7 +22,7 @@ Or install it yourself as:
 
 ## Usage
 
-For a demonstration project (in spanish) see https://github.com/hablutzel1/blobfish-ejbca-client-ruby-demo.
+For a demonstration project see https://github.com/hablutzel1/blobfish-ejbca-client-ruby-demo.
 
 ## Access rules required for client certificate
 
